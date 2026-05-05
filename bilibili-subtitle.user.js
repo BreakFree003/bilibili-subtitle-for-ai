@@ -205,18 +205,21 @@
   }
 
   function buildAiText(meta, body) {
-    const contents = body
-      .map((item) => normalizeContent(item && item.content))
-      .filter(Boolean);
+    const items = body
+      .map((item) => ({
+        from: item && item.from ? Number(item.from) : 0,
+        content: normalizeContent(item && item.content)
+      }))
+      .filter(item => item.content);
 
-    const paragraphs = splitIntoParagraphs(contents);
+    const lines = groupSubtitleLines(items);
     const header = [
       `标题：${meta.title}`,
       `BV：${meta.bvid}`,
       `分P：P${meta.pageNumber} ${meta.pageTitle}`.trim(),
       "",
     ];
-    return `${header.join("\n")}${paragraphs.join("\n\n")}`.trim();
+    return `${header.join("\n")}${lines.join("\n")}`.trim();
   }
 
   function normalizeContent(value) {
@@ -226,35 +229,52 @@
       .trim();
   }
 
-  function splitIntoParagraphs(lines) {
-    const paragraphs = [];
-    let buffer = "";
-    let sentenceCount = 0;
+  function getWordCount(text) {
+    const words = text.match(/[a-zA-Z0-9_]+/g);
+    const englishCount = words ? words.length : 0;
+    // 包含中文、日文、韩文字符
+    const cjkChars = text.match(/[\u4e00-\u9fa5\u3040-\u309F\u30A0-\u30FF\uAC00-\uD7AF]/g);
+    const cjkCount = cjkChars ? cjkChars.length : 0;
+    return englishCount + cjkCount;
+  }
 
-    for (const line of lines) {
-      if (!buffer) {
-        buffer = line;
-      } else if (/^[A-Za-z0-9]/.test(line) && /[A-Za-z0-9]$/.test(buffer)) {
-        buffer += " " + line;
+  function formatTime(seconds) {
+    const sec = Math.floor(seconds);
+    const h = Math.floor(sec / 3600);
+    const m = Math.floor((sec % 3600) / 60);
+    const s = sec % 60;
+    if (h > 0) {
+      return `${h}:${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
+    }
+    return `${m}:${s.toString().padStart(2, "0")}`;
+  }
+
+  function groupSubtitleLines(items) {
+    const MIN_WORDS = 20;
+    const lines = [];
+
+    if (items.length === 0) return lines;
+
+    let currentLine = { ...items[0] };
+    let currentWords = getWordCount(currentLine.content);
+
+    for (let i = 1; i < items.length; i++) {
+      const item = items[i];
+      if (currentWords < MIN_WORDS) {
+        currentLine.content += " " + item.content;
+        currentWords += getWordCount(item.content);
       } else {
-        buffer += line;
-      }
-
-      sentenceCount += countSentenceEnds(line);
-      if (sentenceCount >= 5 || buffer.length >= 520) {
-        paragraphs.push(buffer.trim());
-        buffer = "";
-        sentenceCount = 0;
+        lines.push(`${formatTime(currentLine.from)} ${currentLine.content}`);
+        currentLine = { ...item };
+        currentWords = getWordCount(currentLine.content);
       }
     }
 
-    if (buffer.trim()) paragraphs.push(buffer.trim());
-    return paragraphs;
-  }
+    if (currentLine) {
+      lines.push(`${formatTime(currentLine.from)} ${currentLine.content}`);
+    }
 
-  function countSentenceEnds(text) {
-    const matches = String(text).match(/[。！？.!?]/g);
-    return matches ? matches.length : 0;
+    return lines;
   }
 
   function assertApiOk(json, fallback) {
